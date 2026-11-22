@@ -1,0 +1,11 @@
+avoidance_controller:
+  ros__parameters:
+    enabled: false
+    use_sim_time: false
+    forward_speed_mps: 0.15
+    turn_speed_radps: 0.60
+    obstacle_distance_m: 0.50
+    front_half_angle_deg: 30.0
+    side_limit_deg: 90.0
+    scan_timeout_sec: 0.50
+    scan_frame: lidar_link

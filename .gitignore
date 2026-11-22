@@ -1,0 +1,11 @@
+/build/
+/install/
+/log/
+/.agents/
+/.aws/
+/.codex/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.DS_Store
