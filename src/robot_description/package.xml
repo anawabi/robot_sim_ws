@@ -3,7 +3,6 @@
   <name>robot_description</name><version>0.0.1</version>
   <description>URDF/Xacro model, TF and RViz2 configuration for a Four-wheel skid steer ROS 2 robot</description>
   <maintainer email="aman.nawabi@amannawabi.com">Aman Nawabi</maintainer><license>Apache-2.0</license>
-  <buildtool_depend>ament_python</buildtool_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>rviz2</exec_depend>

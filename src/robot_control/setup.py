@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
             'scan_listener = robot_control.scan_listener:main',
             'avoidance_controller = robot_control.avoidance_controller:main',
+            'vl53l0x_range = robot_control.vl53l0x_range:main',
         ],
     },
 )
