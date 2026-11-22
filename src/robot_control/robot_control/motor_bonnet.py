@@ -6,9 +6,14 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.clock import Clock, ClockType
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import Range
 
 
 COMMAND_TIMEOUT_NS = 300_000_000
+RANGE_TIMEOUT_NS = 350_000_000
+FORWARD_STOP_DISTANCE_M = 0.25
+FRONT_RANGE_FRAME = 'front_range_link'
 DEFAULT_MAX_THROTTLE = 0.25
 MAX_BENCH_THROTTLE = 0.50
 I2C_ERRORS = (OSError, RuntimeError)
@@ -47,21 +52,58 @@ class MotorBonnet(Node):
         self.left_motors = []
         self.clock = Clock(clock_type=ClockType.STEADY_TIME)
         self.last_command = None
+        self.last_clear_range = None
+        self.forward_requested = False
         self.requested = (0.0, 0.0)
         self.applied = (0.0, 0.0)
         self.armed = False
         self.faulted = False
         self.create_subscription(Twist, '/cmd_vel', self.on_command, 1)
+        self.create_subscription(
+            Range, '/range', self.on_range,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
+        )
         self.create_timer(0.05, self.control, clock=self.clock)
+
+    def forward_is_clear(self, now):
+        return (
+            self.last_clear_range is not None
+            and (now - self.last_clear_range).nanoseconds < RANGE_TIMEOUT_NS
+        )
+
+    def on_range(self, reading: Range):
+        if (
+            reading.header.frame_id == FRONT_RANGE_FRAME
+            and reading.radiation_type == Range.INFRARED
+            and isfinite(reading.range)
+            and isfinite(reading.min_range)
+            and isfinite(reading.max_range)
+            and 0.0 <= reading.min_range <= FORWARD_STOP_DISTANCE_M < reading.range
+            <= reading.max_range
+        ):
+            now = self.clock.now()
+            if self.forward_requested and not self.forward_is_clear(now):
+                self.last_command = None
+            self.last_clear_range = now
+        else:
+            self.last_clear_range = None
+            if self.forward_requested:
+                self.last_command = None
 
     def on_command(self, command: Twist):
         if self.armed and self.get_parameter('enabled').value:
+            now = self.clock.now()
+            self.forward_requested = command.linear.x > 0.0
+            if self.forward_requested and not self.forward_is_clear(now):
+                self.last_command = None
+                return
             self.requested = side_throttles(command.linear.x, command.angular.z, self.max_throttle)
-            self.last_command = self.clock.now()
+            self.last_command = now
 
     def stop_motors(self):
         self.armed = False
         self.last_command = None
+        self.forward_requested = False
         for motor in (*self.right_motors, *self.left_motors):
             try:
                 motor.throttle = 0.0
@@ -89,8 +131,10 @@ class MotorBonnet(Node):
 
             target = (0.0, 0.0)
             if self.last_command is not None:
-                age = (self.clock.now() - self.last_command).nanoseconds
-                if age < COMMAND_TIMEOUT_NS:
+                now = self.clock.now()
+                if self.forward_requested and not self.forward_is_clear(now):
+                    self.last_command = None
+                elif (now - self.last_command).nanoseconds < COMMAND_TIMEOUT_NS:
                     target = self.requested
             if target != self.applied:
                 left, right = target
