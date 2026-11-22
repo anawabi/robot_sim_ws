@@ -2,17 +2,21 @@ from math import isfinite
 
 from geometry_msgs.msg import Twist
 import rclpy
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.clock import Clock, ClockType
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
 
 COMMAND_TIMEOUT_NS = 300_000_000
-MAX_THROTTLE = 0.25
+DEFAULT_MAX_THROTTLE = 0.25
+MAX_BENCH_THROTTLE = 0.50
 I2C_ERRORS = (OSError, RuntimeError)
 
 
-def side_throttles(linear: float, yaw: float) -> tuple[float, float]:
+def side_throttles(
+    linear: float, yaw: float, max_throttle: float = DEFAULT_MAX_THROTTLE,
+) -> tuple[float, float]:
     """Map forward velocity and yaw rate to capped open-loop left/right throttle."""
     if not (isfinite(linear) and isfinite(yaw)):
         return 0.0, 0.0
@@ -20,7 +24,7 @@ def side_throttles(linear: float, yaw: float) -> tuple[float, float]:
     forward = max(-1.0, min(1.0, linear / 0.15))
     turn = max(-1.0, min(1.0, yaw / 0.6))
     left, right = forward - turn, forward + turn
-    scale = MAX_THROTTLE / max(1.0, abs(left), abs(right))
+    scale = max_throttle / max(1.0, abs(left), abs(right))
     return left * scale, right * scale
 
 
@@ -28,6 +32,16 @@ class MotorBonnet(Node):
     def __init__(self, open_kit):
         super().__init__('motor_bonnet')
         self.declare_parameter('enabled', False)
+        self.max_throttle = self.declare_parameter(
+            'max_throttle',
+            DEFAULT_MAX_THROTTLE,
+            ParameterDescriptor(
+                description='Open-loop throttle ceiling. Set to 0.50 only for lifted bench tests.',
+                read_only=True,
+            ),
+        ).value
+        if not 0.0 < self.max_throttle <= MAX_BENCH_THROTTLE:
+            raise ValueError('max_throttle must be greater than 0.0 and at most 0.50')
         self.open_kit = open_kit
         self.right_motors = []
         self.left_motors = []
@@ -42,7 +56,7 @@ class MotorBonnet(Node):
 
     def on_command(self, command: Twist):
         if self.armed and self.get_parameter('enabled').value:
-            self.requested = side_throttles(command.linear.x, command.angular.z)
+            self.requested = side_throttles(command.linear.x, command.angular.z, self.max_throttle)
             self.last_command = self.clock.now()
 
     def stop_motors(self):
